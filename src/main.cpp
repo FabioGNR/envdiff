@@ -81,27 +81,6 @@ environment_strings from_storage( std::wifstream &storage )
 	return vars;
 }
 
-void run_script( std::string path )
-{
-	#ifdef WIN32
-		std::wstring wpath = L"cmd.exe /C " + std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(path);
-		PROCESS_INFORMATION proc_info{};
-		//todo: close process handle?
-		STARTUPINFO startup_info{};
-		if( CreateProcess( NULL, &wpath[0], nullptr, nullptr, false, CREATE_UNICODE_ENVIRONMENT, NULL, NULL, &startup_info, &proc_info) )
-		{
-			std::this_thread::sleep_for( std::chrono::seconds( 2 ) );
-			TerminateProcess( proc_info.hProcess, 0);
-		}
-		else
-		{
-			auto error = GetLastError();
-
-			throw std::runtime_error( "could not launch script " + std::to_string(error) );
-		}
-	#endif
-}
-
 bool parse_config( int argc, char** argv, config& conf )
 {
 	if( argc < 1 )
@@ -125,11 +104,39 @@ void write_bash_set( const std::wstring &key, const std::wstring &value, std::wo
 	out << L'"' << std::endl;
 }
 
-void write_bash_add( const std::wstring &key, const std::wstring &old_value, const std::wstring &new_value, std::wostream &out )
+std::vector< std::wstring > split_values( const std::wstring &value )
+{
+	std::vector< std::wstring > values;
+	auto start_it = value.begin();
+	auto separator_it = std::find( value.begin(), value.end(), L';' );
+	while( separator_it != value.end() )
+	{
+		if( start_it != separator_it )
+		{
+			values.emplace_back( start_it, separator_it );
+		}
+		start_it = std::next( separator_it );
+		if( start_it != value.end() )
+		{
+			separator_it = std::find( start_it, value.end(), L';' );
+		}
+		else
+		{
+			break;
+		}
+	}
+	if( start_it != value.end() )
+	{
+		// add last value
+		values.emplace_back( start_it, separator_it );
+	}
+	return values;
+}
+
+void write_bash_add( const std::wstring &key, const std::wstring &new_value, std::wostream &out )
 {
 	out << L"export ";
 	out << key;
-	//todo: split new_value/old_value by ; and only add new ones, in separate lines
 	out << L"=\"$" << key << L':' << new_value;
 	if( !new_value.empty() && *std::prev( new_value.end() ) == L'\\' )
 	{
@@ -138,6 +145,21 @@ void write_bash_add( const std::wstring &key, const std::wstring &old_value, con
 	out << L'"' << std::endl;
 }
 
+void write_bash_add( const std::wstring &key, const std::wstring &old_value, const std::wstring &new_value, std::wostream &out )
+{
+	auto old_values = split_values( old_value );
+	auto new_values = split_values( new_value );
+	for( const auto &value : new_values )
+	{
+		auto old_it = std::find( old_values.begin(), old_values.end(), value );
+		if( old_it == old_values.end() )
+		{
+			write_bash_add( key, value, out );
+		}
+	}
+}
+
+
 void generate_bash_script( const environment_strings &pre, const environment_strings &post, std::wostream &out )
 {
 	for( auto [ key, value ] : post )
@@ -145,10 +167,12 @@ void generate_bash_script( const environment_strings &pre, const environment_str
 		auto pre_it = pre.find( key );
 		if( pre_it == pre.end() )
 		{
+			std::wcout << L"setting " << key << std::endl;
 			write_bash_set( key, value, out );
 		}
 		else if( pre_it->second != value )
 		{
+			std::wcout << L"adding to " << key << std::endl;
 			write_bash_add( key, pre_it->second, value, out );
 		}
 	}
