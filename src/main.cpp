@@ -14,7 +14,7 @@
 
 struct config {
 	std::string storage_path;
-	std::string vcvars_script;
+	std::string identifier;
 };
 
 class environment_strings_handle {
@@ -83,17 +83,14 @@ environment_strings from_storage( std::wifstream &storage )
 
 bool parse_config( int argc, char** argv, config& conf )
 {
-	if( argc < 1 )
-	{
-		return false;
-	}
-	conf.vcvars_script = argv[0];
-	conf.storage_path = "vcvars-pre.tmp"; // default
+	conf.identifier = argc >= 2 ? argv[1] : "vcvars";
+	conf.storage_path = argc >= 3 ? argv[2] : "vcvars-pre.tmp";
 	return true;
 }
 
-void write_bash_set( const std::wstring &key, const std::wstring &value, std::wostream &out )
+void write_bash_set( const std::wstring &prefix, const std::wstring &key, const std::wstring &value, std::wostream &out )
 {
+	out << prefix;
 	out << L"export ";
 	out << key;
 	out << L"=\"" << value;
@@ -133,8 +130,9 @@ std::vector< std::wstring > split_values( const std::wstring &value )
 	return values;
 }
 
-void write_bash_add( const std::wstring &key, const std::wstring &new_value, std::wostream &out )
+void write_bash_add( const std::wstring &prefix, const std::wstring &key, const std::wstring &new_value, std::wostream &out )
 {
+	out << prefix;
 	out << L"export ";
 	out << key;
 	out << L"=\"$" << key << L':' << new_value;
@@ -145,7 +143,7 @@ void write_bash_add( const std::wstring &key, const std::wstring &new_value, std
 	out << L'"' << std::endl;
 }
 
-void write_bash_add( const std::wstring &key, const std::wstring &old_value, const std::wstring &new_value, std::wostream &out )
+void write_bash_add( const std::wstring &prefix, const std::wstring &key, const std::wstring &old_value, const std::wstring &new_value, std::wostream &out )
 {
 	auto old_values = split_values( old_value );
 	auto new_values = split_values( new_value );
@@ -154,50 +152,51 @@ void write_bash_add( const std::wstring &key, const std::wstring &old_value, con
 		auto old_it = std::find( old_values.begin(), old_values.end(), value );
 		if( old_it == old_values.end() )
 		{
-			write_bash_add( key, value, out );
+			write_bash_add( prefix, key, value, out );
 		}
 	}
 }
 
 const static auto pre_prefix = L"__PRE_VCVARS_";
 
-void generate_bash_script( const environment_strings &pre, const environment_strings &post, std::wostream &out )
+void generate_bash_script( const std::string &identifier, const environment_strings &pre, const environment_strings &post, std::wostream &out )
 {
+	const std::wstring widentifier( identifier.begin(), identifier.end() );
 	// write set function
+	out << std::endl << L"function set_" + widentifier + L"() {" << std::endl;
 	for( auto [ key, value ] : post )
 	{
 		auto pre_it = pre.find( key );
 		if( pre_it == pre.end() )
 		{
 			std::wcout << L"setting " << key << std::endl;
-			write_bash_set( key, value, out );
+			write_bash_set( L"\t", key, value, out );
 		}
 		else if( pre_it->second != value )
 		{
 			const auto pre_key = pre_prefix + key;
 			const auto pre_value = L"${" + key + L"}";
-			write_bash_set( pre_key, pre_value, out );
+			write_bash_set( L"\t", pre_key, pre_value, out );
 			std::wcout << L"adding to " << key << std::endl;
-			write_bash_add( key, pre_it->second, value, out );
+			write_bash_add( L"\t", key, pre_it->second, value, out );
 		}
 	}
+	out << L"}" << std::endl;
 	// write reset function
-	out << std::endl << L"function reset_vcvars() {" << std::endl;
+	out << std::endl << L"function reset_" + widentifier + L"() {" << std::endl;
 	for( auto [ key, value ] : post )
 	{
 		auto pre_it = pre.find( key );
 		if( pre_it == pre.end() )
 		{
-			out << L"\t";
 			// clear variable
-			write_bash_set( key, L"", out );
+			write_bash_set( L"\t", key, L"", out );
 		}
 		else if( pre_it->second != value )
 		{
-			out << L"\t";
 			// reset to pre-value
 			const auto pre_key = pre_prefix + key;
-			write_bash_set( key, L"${" + pre_key + L"}", out );
+			write_bash_set( L"\t", key, L"${" + pre_key + L"}", out );
 		}
 	}
 	out << L"}" << std::endl;
@@ -217,7 +216,7 @@ int main( int argc, char** argv )
 		auto post_script = get_environment_strings();
 		std::wofstream out("vcvars.sh");
 
-		generate_bash_script( pre_script, post_script, out );
+		generate_bash_script( conf.identifier, pre_script, post_script, out );
 		std::cout << "Stored vcvars bash in vcvars.sh";
 		return 0;
 	}
