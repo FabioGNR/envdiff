@@ -159,9 +159,11 @@ void write_bash_add( const std::wstring &key, const std::wstring &old_value, con
 	}
 }
 
+const static auto pre_prefix = L"__PRE_VCVARS_";
 
 void generate_bash_script( const environment_strings &pre, const environment_strings &post, std::wostream &out )
 {
+	// write set function
 	for( auto [ key, value ] : post )
 	{
 		auto pre_it = pre.find( key );
@@ -172,10 +174,33 @@ void generate_bash_script( const environment_strings &pre, const environment_str
 		}
 		else if( pre_it->second != value )
 		{
+			const auto pre_key = pre_prefix + key;
+			const auto pre_value = L"${" + key + L"}";
+			write_bash_set( pre_key, pre_value, out );
 			std::wcout << L"adding to " << key << std::endl;
 			write_bash_add( key, pre_it->second, value, out );
 		}
 	}
+	// write reset function
+	out << std::endl << L"function reset_vcvars() {" << std::endl;
+	for( auto [ key, value ] : post )
+	{
+		auto pre_it = pre.find( key );
+		if( pre_it == pre.end() )
+		{
+			out << L"\t";
+			// clear variable
+			write_bash_set( key, L"", out );
+		}
+		else if( pre_it->second != value )
+		{
+			out << L"\t";
+			// reset to pre-value
+			const auto pre_key = pre_prefix + key;
+			write_bash_set( key, L"${" + pre_key + L"}", out );
+		}
+	}
+	out << L"}" << std::endl;
 }
 
 int main( int argc, char** argv )
