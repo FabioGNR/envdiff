@@ -40,6 +40,19 @@ class environment_strings_handle {
 
 using environment_strings = std::map< std::wstring, std::wstring >;
 
+std::wstring convert_key_to_unix( const std::wstring &key )
+{
+	static std::map< std::wstring, std::wstring > map {
+		{ L"Path", L"PATH" }
+	};
+	auto map_it = map.find( key );
+	if( map_it != map.end() )
+	{
+		return map_it->second;
+	}
+	return key;
+}
+
 environment_strings get_environment_strings()
 {
 	environment_strings_handle strings( GetEnvironmentStrings() );
@@ -50,7 +63,7 @@ environment_strings get_environment_strings()
 		std::wstring env_string ( str_ptr );
 		str_ptr += env_string.size() + 1;
 		auto key_end = std::find( env_string.begin(), env_string.end(), L'=' );
-		std::wstring key ( env_string.begin(), key_end );
+		std::wstring key = convert_key_to_unix( std::wstring( env_string.begin(), key_end ) );
 		std::wstring value ( std::next( key_end ), env_string.end() );
 		vars.insert( { key, value } );
 	}
